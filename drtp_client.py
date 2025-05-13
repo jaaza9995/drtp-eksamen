@@ -1,6 +1,7 @@
 import socket
 import time
 from header import create_packet, parse_header
+from datetime import datetime
 
 def run_client(ip, port, filename):
     buffer_size = 1472
@@ -28,9 +29,8 @@ def run_client(ip, port, filename):
             client_socket.sendto(syn, server_addr)
 
     print("Connection established")
-    seq = 1  # Første datapakke starter med seq=1
+    seq = 1
     time.sleep(0.2)
-
 
     with open(filename, "rb") as f:
         file_data = f.read()
@@ -41,22 +41,22 @@ def run_client(ip, port, filename):
         while True:
             pkt = create_packet(seq, 0, 0b0000, 0, chunk)
             client_socket.sendto(pkt, server_addr)
-            timestamp = time.time()
-            window = list(range(seq, seq + 5))
+
+            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            window_size = 5
+            window = list(range(seq, seq + window_size))
             window_str = ', '.join(str(n) for n in window)
-            print(f"{timestamp:.6f} -- packet with seq = {seq} is sent, sliding window = {{{window_str}}}")
+            print(f"{timestamp} -- packet with seq = {seq} is sent, sliding window = {{{window_str}}}")
 
             try:
                 response, _ = client_socket.recvfrom(buffer_size)
                 r_seq, r_ack, r_flags, _ = parse_header(response[:12])
-                print(f"[DEBUG] Received ACK header: seq={r_seq}, ack={r_ack}, flags={r_flags}")
                 if r_flags == 0b0010 and r_ack == seq + 1:
-                    print(f"{timestamp:.6f} -- ACK for packet = {seq} is received")
+                    print(f"{timestamp} -- ACK for packet = {seq} is received")
                     seq += 1
                     break
             except socket.timeout:
-                print(f"[DEBUG] Timeout waiting for ACK for seq={seq}")
-                pass
+                continue
 
     print("....")
     print("DATA Finished")

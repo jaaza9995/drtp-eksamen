@@ -10,7 +10,7 @@ print(f"size of the header = {calcsize(header_format)}")
 def create_packet(seq, ack, flags, win, data):
     header = pack(header_format, seq, ack, flags, win)
     packet = header + data
-    print(f"packet containing header + data of size {len(packet)}")
+    
     return packet
 
 def parse_header(header):

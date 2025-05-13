@@ -1,76 +1,58 @@
 import socket
 import time
-from header import create_packet, parse_header
+from header import parse_header, create_packet
+from datetime import datetime
 
-def run_client(ip, port, filename):
+def run_server(ip, port):
     buffer_size = 1472
-    syn_seq = 0
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(0.4)
-    server_addr = (ip, port)
+    expected_seq = 1
+    file_data = b''
 
-    print("SYN packet is sent")
-    syn = create_packet(syn_seq, 0, 0b0001, 0, b'')
-    client_socket.sendto(syn, server_addr)
-    time.sleep(0.1)
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_socket.bind((ip, port))
 
     while True:
-        try:
-            response, _ = client_socket.recvfrom(buffer_size)
-            r_seq, r_ack, r_flags, _ = parse_header(response[:12])
-            if r_flags == 0b0011:
-                print("SYN-ACK packet is received")
-                ack = create_packet(syn_seq, r_seq + 1, 0b0010, 0, b'')
-                client_socket.sendto(ack, server_addr)
-                print("ACK packet is sent")
-                break
-        except socket.timeout:
-            client_socket.sendto(syn, server_addr)
+        packet, addr = server_socket.recvfrom(buffer_size)
+        seq, ack, flags, win = parse_header(packet[:12])
+        data = packet[12:]
 
-    print("Connection established")
-    seq = 1
-    time.sleep(0.2)
+        if flags == 0b0001:
+            print("SYN packet is received")
+            synack = create_packet(0, seq + 1, 0b0011, 0, b'')
+            server_socket.sendto(synack, addr)
+            print("SYN-ACK packet is sent")
+            continue
 
-    with open(filename, "rb") as f:
-        file_data = f.read()
+        elif flags == 0b0010:
+            print("ACK packet is received")
+            print("Connection established")
+            start_time = time.time()
+            continue
 
-    chunks = [file_data[i:i+992] for i in range(0, len(file_data), 992)]
+        elif flags == 0b1000:
+            print("FIN packet is received")
+            fin_ack = create_packet(0, seq + 1, 0b0010, 0, b'')
+            server_socket.sendto(fin_ack, addr)
+            print("FIN ACK packet is sent")
+            break
 
-    for chunk in chunks:
-        while True:
-            pkt = create_packet(seq, 0, 0b0000, 0, chunk)
-            client_socket.sendto(pkt, server_addr)
-            timestamp = time.time()
-            window = list(range(seq, seq + 5))
-            window_str = ', '.join(str(n) for n in window)
-            print(f"{timestamp:.6f} -- packet with seq = {seq} is sent, sliding window = {{{window_str}}}")
+        if seq == expected_seq:
+            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"{timestamp} -- packet {seq} is received")
+            print(f"{timestamp} -- sending ack for the received {seq}")
+            file_data += data
+            ack_pkt = create_packet(0, seq + 1, 0b0010, 0, b'')
+            server_socket.sendto(ack_pkt, addr)
+            expected_seq += 1
+            continue
 
-            try:
-                response, _ = client_socket.recvfrom(buffer_size)
-                r_seq, r_ack, r_flags, _ = parse_header(response[:12])
-                if r_flags == 0b0010 and r_ack == seq + 1:
-                    print(f"{timestamp:.6f} -- ACK for packet = {seq} is received")
-                    seq += 1
-                    break
-            except socket.timeout:
-                pass
+    end_time = time.time()
+    duration = end_time - start_time
+    throughput = (len(file_data) * 8) / (duration * 1_000_000)
 
-    print("....")
-    print("DATA Finished")
+    with open("received_file", "wb") as f:
+        f.write(file_data)
 
-    fin = create_packet(seq, 0, 0b1000, 0, b'')
-    client_socket.sendto(fin, server_addr)
-    print("FIN packet is sent")
-
-    while True:
-        try:
-            response, _ = client_socket.recvfrom(buffer_size)
-            r_seq, r_ack, r_flags, _ = parse_header(response[:12])
-            if r_flags == 0b0010:
-                print("FIN ACK packet is received")
-                break
-        except socket.timeout:
-            client_socket.sendto(fin, server_addr)
-
-    client_socket.close()
+    print(f"The throughput is {throughput:.2f} Mbps")
     print("Connection Closes")
+    server_socket.close()
