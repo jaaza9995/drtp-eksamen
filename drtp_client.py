@@ -3,7 +3,7 @@ import time
 from header import create_packet, parse_header
 from datetime import datetime
 
-def run_client(ip, port, filename):
+def run_client(ip, port, filename, window_size):
     buffer_size = 1472
     syn_seq = 0
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -41,9 +41,7 @@ def run_client(ip, port, filename):
         while True:
             pkt = create_packet(seq, 0, 0b0000, 0, chunk)
             client_socket.sendto(pkt, server_addr)
-
             timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            window_size = 5
             window = list(range(seq, seq + window_size))
             window_str = ', '.join(str(n) for n in window)
             print(f"{timestamp} -- packet with seq = {seq} is sent, sliding window = {{{window_str}}}")

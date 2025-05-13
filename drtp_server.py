@@ -39,11 +39,13 @@ def run_server(ip, port):
         if seq == expected_seq:
             timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             print(f"{timestamp} -- packet {seq} is received")
-            print(f"{timestamp} -- sending ack for the received {seq}")
             file_data += data
             ack_pkt = create_packet(0, seq + 1, 0b0010, 0, b'')
             server_socket.sendto(ack_pkt, addr)
+            print(f"{timestamp} -- sending ack for the received {seq}")
             expected_seq += 1
+        else:
+            # Du kan skrive ut feilmelding her hvis ønskelig
             continue
 
     end_time = time.time()
