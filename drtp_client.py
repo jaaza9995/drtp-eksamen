@@ -4,14 +4,13 @@ from header import create_packet, parse_header
 
 def run_client(ip, port, filename):
     buffer_size = 1472
-    seq = 1  # <--- VIKTIG
+    syn_seq = 0
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client_socket.settimeout(0.4)
     server_addr = (ip, port)
 
-
     print("SYN packet is sent")
-    syn = create_packet(seq, 0, 0b0001, 0, b'')
+    syn = create_packet(syn_seq, 0, 0b0001, 0, b'')
     client_socket.sendto(syn, server_addr)
     time.sleep(0.1)
 
@@ -19,10 +18,9 @@ def run_client(ip, port, filename):
         try:
             response, _ = client_socket.recvfrom(buffer_size)
             r_seq, r_ack, r_flags, _ = parse_header(response[:12])
-            print(f"[DEBUG] Received during handshake: seq={r_seq}, ack={r_ack}, flags={r_flags}")
             if r_flags == 0b0011:
                 print("SYN-ACK packet is received")
-                ack = create_packet(seq, r_seq + 1, 0b0010, 0, b'')
+                ack = create_packet(syn_seq, r_seq + 1, 0b0010, 0, b'')
                 client_socket.sendto(ack, server_addr)
                 print("ACK packet is sent")
                 break
@@ -30,8 +28,9 @@ def run_client(ip, port, filename):
             client_socket.sendto(syn, server_addr)
 
     print("Connection established")
-    seq += 1
+    seq = 1  # Første datapakke starter med seq=1
     time.sleep(0.2)
+
 
     with open(filename, "rb") as f:
         file_data = f.read()
