@@ -1,77 +1,81 @@
+# drtp_server.py
+from datetime import datetime
 import socket
 import time
-from header import parse_header, create_packet
-from datetime import datetime
+from header import parse_header, create_packet, get_header_size
 
-def run_server(ip, port, destination_file, discard=False):
-    buffer_size = 1472
+def run_server(ip, port, destination_file, discard_seq=None):
+    dropped = False
+    buffer_size = 1000  # 8 byte header + 992 byte data
     expected_seq = 1
-    file_data = b''
+    total_bytes = 0
+    header_size = get_header_size()
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind((ip, port))
 
-    dropped_once = False  # Vi dropper kun én gang
+    print("SYN packet is received")
 
-    while True:
-        packet, addr = server_socket.recvfrom(buffer_size)
-        seq, ack, flags, win = parse_header(packet[:12])
-        data = packet[12:]
+    # === 3-WAY HANDSHAKE ===
+    syn_msg, client_addr = server_socket.recvfrom(buffer_size)
+    seq, ack, flags, win = parse_header(syn_msg)
+    syn_ack_packet = create_packet(0, 0, 0b1100, 15)  # SYN+ACK, win=15
+    server_socket.sendto(syn_ack_packet, client_addr)
+    print("SYN-ACK packet is sent")
 
-        if flags == 0b0001:
-            print("SYN packet is received")
-            synack = create_packet(0, seq + 1, 0b0011, 15, b'')  # sender vindu = 15
-            server_socket.sendto(synack, addr)
-            print("SYN-ACK packet is sent")
-            continue
+    # wait for final ACK from client
+    final_ack, _ = server_socket.recvfrom(buffer_size)
+    print("ACK packet is received")
+    print("Connection established")
 
-        elif flags == 0b0010:
-            print("ACK packet is received")
-            print("Connection established")
-            start_time = time.time()
-            continue
+    # === Start timer ===
+    start_time = time.time()
 
-        elif flags == 0b1000:
-            print("FIN packet is received")
-            fin_ack = create_packet(0, seq + 1, 0b1010, 0, b'')  # FIN + ACK
-            server_socket.sendto(fin_ack, addr)
-            print("FIN ACK packet is sent")
-            break
+    with open(destination_file, "wb") as f:
+        while True:
+            try:
+                packet, _ = server_socket.recvfrom(buffer_size)
+                if len(packet) >= header_size:
+                    seq, ack, flags, win = parse_header(packet)
 
-        # === DROP PAKKE EN GANG HVIS --discard ER AKTIV ===
-        if discard and not dropped_once and seq == 3:
-            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"{timestamp} -- packet {seq} is intentionally dropped (discard test)")
-            dropped_once = True
-            continue
+                    # Handle FIN
+                    if flags & (1 << 1):  # FIN flag
+                        print("FIN packet is received")
+                        fin_ack = create_packet(0, 0, 0b0110, 0)  # FIN+ACK
+                        server_socket.sendto(fin_ack, client_addr)
+                        print("FIN ACK packet is sent")
+                        break
 
-        # === NORMAL MOTTAGELSE ===
-        if seq == expected_seq:
-            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"{timestamp} -- packet {seq} is received")
-            file_data += data
-            ack_pkt = create_packet(0, seq + 1, 0b0010, 0, b'')
-            server_socket.sendto(ack_pkt, addr)
-            print(f"{timestamp} -- sending ack for the received {seq}")
-            expected_seq += 1
-        else:
-            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"{timestamp} -- packet {seq} is discarded (expected {expected_seq})")
-            continue
+                    # Drop specific packet (if -d used)
+                    if discard_seq is not None and seq == discard_seq and not dropped:
+                            dropped = True
+                            print(f"{datetime.now()} --- deliberately dropping packet {seq}")
+                            continue
 
-    # === FILE WRITING OG THROUGHPUT ===
+                    if seq == expected_seq:
+                        data = packet[header_size:]
+                        f.write(data)
+                        total_bytes += len(data)
+
+                        from datetime import datetime
+                        print(f"{datetime.now()} -- sending ack for the received {seq}")
+                        ack_pkt = create_packet(0, seq, 0b0100, 0)
+                        server_socket.sendto(ack_pkt, client_addr)
+                        print(f"{datetime.now()} -- packet {seq} is received")
+
+                        expected_seq += 1
+                    else:
+                        # Out-of-order packets ignored (Go-Back-N)
+                        continue
+            except socket.timeout:
+                continue
+
+    # === End timer ===
     end_time = time.time()
     duration = end_time - start_time
-    throughput = (len(file_data) * 8) / (duration * 1_000_000)
+    mb_received = total_bytes / 1_000_000
+    throughput = mb_received * 8 / duration
 
-    try:
-        with open(destination_file, "wb") as f:
-            f.write(file_data)
-        print(f"File successfully written to '{destination_file}'")
-    except Exception as e:
-        print(f"Error writing to file '{destination_file}': {e}")
-
-
-    print(f"The throughput is {throughput:.2f} Mbps")
+    print(f"\nThe throughput is {throughput:.2f} Mbps")
     print("Connection Closes")
     server_socket.close()
