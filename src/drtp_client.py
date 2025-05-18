@@ -118,13 +118,6 @@ def run_client(ip, port, filename, window_size):
         except socket.timeout:
             print("Timeout on FIN, sending FIN again")
             client_socket.sendto(fin_pkt, server_addr)
-
-    # === Gjør ferdig og regner ut throughput ===
-    end_time = time.time()
-    duration = end_time - start_time
-    mb_sent = sum(len(chunk) for chunk in data_chunks) / 1_000_000  # Bytes til MB
-    throughput = mb_sent * 8 / duration  # Mbps
-
-    print(f"\nThe throughput is {throughput:.2f} Mbps")
-    print("Connection closed")
-    client_socket.close()
+            
+        print("Connection closed")
+        client_socket.close()
